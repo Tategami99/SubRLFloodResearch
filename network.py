@@ -11,5 +11,5 @@ class SensorPlacementPolicy(nn.Module):
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        x = self.fc2(x)
+        x = self.fc3(x)
         return torch.softmax(x, dim=-1)

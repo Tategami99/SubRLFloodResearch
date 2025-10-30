@@ -15,6 +15,7 @@ class FloodCoverageEnvironment:
         pygame.init()
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("Flood Coverage Environment")
+        self.font = pygame.font.Font(None, 24)
 
     def reset(self):
         self.drone_positions = []
@@ -80,17 +81,27 @@ class FloodCoverageEnvironment:
         for x in range(self.density_map.shape[0]):
             for y in range(self.density_map.shape[1]):
                 rect = pygame.Rect(y * self.cell_size, x * self.cell_size, self.cell_size, self.cell_size)
-                red_intensity = int(255 * (self.density_map[x, y]))
-                color = (red_intensity, 0, 0)
+                density = self.density_map[x, y]
                 if self.covered[x, y]:
-                    color = (0, 200, 0)
+                    color = (0, min(255, 100 + int(155 * density)), 0)
+                else:
+                    color = (min(255, 100 + int(155 * density)), 0, 0)
                 pygame.draw.rect(self.screen, color, rect)
+                pygame.draw.rect(self.screen, (50, 50, 50), rect, 1) #grid lines
 
         for pos in self.drone_positions:
             x, y = pos
             center = (y * self.cell_size + self.cell_size // 2, x * self.cell_size + self.cell_size // 2)
             pygame.draw.circle(self.screen, (0, 0, 255), center, self.cell_size // 3)
+            pygame.draw.circle(self.screen, (255, 255, 255), center, self.cell_size // 3, 2)
+
+        # display info
+        coverage = self.compute_total_coverage()
+        info_text = f"Drones: {len(self.drone_positions)}/{self.n_drones} Coverage: {coverage:.1f}"
+        text_surface = self.font.render(info_text, True, (255, 255, 255))
+        self.screen.blit(text_surface, (10, 10))
         pygame.display.flip()
+        return True
 
     def close(self):
         pygame.quit()
