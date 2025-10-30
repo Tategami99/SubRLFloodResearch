@@ -19,25 +19,56 @@ class FloodCoverageEnvironment:
     def reset(self):
         self.drone_positions = []
         self.covered = np.zeros_like(self.density_map, dtype=bool)
-        return self.covered.copy(), len(self.drone_positions)
+        self.visited_locations = set()
+        return self.get_state()
     
-    def compute_submodular_reward(self):
+    def get_state(self):
+        return self.covered.copy().flatten()
+    
+    def compute_total_coverage(self):
         return np.sum(self.density_map * self.covered)
+    
+    def compute_marginal_gain(self, position):
+        if position in self.visited_locations:
+            return 0.0
+        
+        #calculate what would be newly covered
+        x, y = position
+        new_coverage = 0.0
+        for row_offset in range(-self.coverage_radius, self.coverage_radius + 1):
+            for col_offset in range(-self.coverage_radius, self.coverage_radius + 1):
+                neighbor_row = x + row_offset
+                neighbor_col = y + col_offset
+                if(0 <= neighbor_row < self.density_map.shape[0] and 
+                   0 <= neighbor_col < self.density_map.shape[1] and 
+                   not self.covered[neighbor_row, neighbor_col]):
+                    new_coverage += self.density_map[neighbor_row, neighbor_col]
+            
+        return new_coverage
+
     
     def step(self, action_indices):
         pos = self.possible_locations[action_indices]
+        
+        #calculate marginal gain BEFORE placing the drone
+        marginal_gain = self.compute_marginal_gain(pos)
+
+        #place drone and update coverage
         self.drone_positions.append(pos)
+        self.visited_locations.add(pos)
+
         x, y = pos
         for row_offset in range(-self.coverage_radius, self.coverage_radius + 1):
             for col_offset in range(-self.coverage_radius, self.coverage_radius + 1):
                 neighbor_row = x + row_offset
                 neighbor_col = y + col_offset
-                if(0 <= neighbor_row < self.density_map.shape[0] and 0 <= neighbor_col < self.density_map.shape[1]):
+                if(0 <= neighbor_row < self.density_map.shape[0] and 
+                    0 <= neighbor_col < self.density_map.shape[1]):
                     self.covered[neighbor_row, neighbor_col] = True
 
-        reward = self.compute_submodular_reward()
+        total_reward = self.compute_total_coverage()
         done = len(self.drone_positions) >= self.n_drones
-        return self.covered.copy(), reward, done
+        return self.get_state(), marginal_gain, total_reward, done
                     
 
     def render(self):
