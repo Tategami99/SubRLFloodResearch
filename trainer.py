@@ -145,6 +145,13 @@ class SubPolicyTrainer:
             torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
             self.optimizer.step()
 
+        # if len(self.epoch_rewards) > 200:
+        #     recent_best = max(self.epoch_rewards[-100:])
+        #     previous_best = max(self.epoch_rewards[-200:-100])
+        #     if recent_best - previous_best < 0.05: # very little improvement
+        #         for param_group in self.optimizer.param_groups:
+        #             param_group['lr'] *= 0.8  # reduce learning rate
+
         return loss.item()
     
     def update_metrics(self, epoch, avg_reward, avg_marginal_sum, avg_duplicate_rate, loss):
