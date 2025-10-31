@@ -15,7 +15,10 @@ class FloodCoverageEnvironment:
         return self.get_state()
     
     def get_state(self):
-        return self.covered.copy().flatten()
+        coverage_layer = self.covered.astype(np.float32)
+        density_layer = self.density_map
+        state = np.stack([coverage_layer, density_layer], axis=0)
+        return state.flatten()
     
     def compute_total_coverage(self):
         return np.sum(self.density_map * self.covered)
@@ -29,6 +32,9 @@ class FloodCoverageEnvironment:
         new_coverage = 0.0
         for row_offset in range(-self.coverage_radius, self.coverage_radius + 1):
             for col_offset in range(-self.coverage_radius, self.coverage_radius + 1):
+                if abs(row_offset) + abs(col_offset) > self.coverage_radius:
+                    continue
+
                 neighbor_row = x + row_offset
                 neighbor_col = y + col_offset
                 if(0 <= neighbor_row < self.density_map.shape[0] and 
@@ -52,6 +58,9 @@ class FloodCoverageEnvironment:
         x, y = pos
         for row_offset in range(-self.coverage_radius, self.coverage_radius + 1):
             for col_offset in range(-self.coverage_radius, self.coverage_radius + 1):
+                if abs(row_offset) + abs(col_offset) > self.coverage_radius:
+                    continue
+
                 neighbor_row = x + row_offset
                 neighbor_col = y + col_offset
                 if(0 <= neighbor_row < self.density_map.shape[0] and 

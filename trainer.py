@@ -29,16 +29,30 @@ class SubPolicyTrainer:
         for trajectory in trajectories:
             states, actions, marginal_gains = trajectory
 
+            if len(marginal_gains) == 0:
+                continue
+
             H = len(marginal_gains)
             cumulative_future_gains = []
             for i in range(H):
-                future_gain = sum(marginal_gains[i:])
+                discount_factor = 0.95
+                future_gain = sum(marginal_gains[i] * (discount_factor ** (j - i)) for j in range(i, H))
                 cumulative_future_gains.append(future_gain)
 
             cumulative_future_gains = torch.tensor(cumulative_future_gains, dtype=torch.float32)
 
             # simple baseline: average marginal gain
-            baseline = cumulative_future_gains.mean()
+            # baseline = cumulative_future_gains.mean()
+            # advantages = cumulative_future_gains - baseline
+
+            # better baseline: moving average of marginal gains
+            baseline = torch.zeros_like(cumulative_future_gains)
+            for i in range(H):
+                if i == 0:
+                    baseline[i] = cumulative_future_gains[i]
+                else:
+                    baseline[i] = 0.8 * baseline[i-1] + 0.2 * cumulative_future_gains[i]
+
             advantages = cumulative_future_gains - baseline
 
             # normalize advantages
@@ -46,27 +60,25 @@ class SubPolicyTrainer:
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
             # compute policy gradient
-            log_probs = []
-            entropies = []
-            for state, action in zip(states, actions):
+            total_loss = 0.0
+            entropy_sum = 0.0
+            for i, (state, action) in enumerate(zip(states, actions)):
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action_probs = self.policy_network(state_tensor)
                 dist = torch.distributions.Categorical(action_probs)
                 log_prob = dist.log_prob(torch.tensor(action))
                 entropy = dist.entropy()
 
-                log_probs.append(log_prob)
-                entropies.append(entropy)
+                # submodular policy gradient with entropy regularization
+                policy_loss = -log_prob * advantages[i]
+                entropy_loss = -entropy_coef * entropy
 
-            # submodular policy gradient
-            loss = 0
-            for log_prob, advantage in zip(log_probs, advantages):
-                loss -= log_prob * advantage
-                loss -= entropy_coef * entropy  # encourage exploration
+                total_loss += policy_loss + entropy_loss
+                entropy_sum += entropy
             
-            policy_gradients.append(loss)
+            policy_gradients.append(total_loss / len(actions))
 
-        return torch.stack(policy_gradients).mean()
+        return torch.stack(policy_gradients).mean() if policy_gradients else torch.tensor(0.0)
     
     # collect trajectories for one epoch - returns metrics for visualization
     def collect_trajectories(self, batch_size=8, use_action_masking=False):
@@ -120,10 +132,19 @@ class SubPolicyTrainer:
     
     # update policy with collected trajectories
     def update_policy(self, batch_trajectories, entropy_coef):
+        if not batch_trajectories or len(batch_trajectories) == 0:
+            return 0.0
+
         self.optimizer.zero_grad()
         loss = self.compute_subpo_gradient(batch_trajectories, entropy_coef)
-        loss.backward()
-        self.optimizer.step()
+        
+        # only backward if valid loss
+        if loss != 0.0:
+            loss.backward()
+            # gradient clipping to prevent explosions
+            torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
+            self.optimizer.step()
+
         return loss.item()
     
     def update_metrics(self, epoch, avg_reward, avg_marginal_sum, avg_duplicate_rate, loss):

@@ -20,6 +20,10 @@ def create_density_map():
 def main():
     density_map = create_density_map()
     env = FloodCoverageEnvironment(density_map, n_drones=5, coverage_radius=1)
+
+    # test the state size
+    test_state = env.reset()
+    print(f"State size: {len(test_state)}")  # Should be 128 for 8x8 map (2 * 8 * 8)
     
     cell_size = 40
     env_width = density_map.shape[1] * cell_size
@@ -29,7 +33,7 @@ def main():
     display_height = 1080//2
     visualizer = TrainingVisualizer(env_width, env_height, cell_size, display_width, display_height)
     
-    input_dim = density_map.size
+    input_dim = len(test_state) # 2 * map_size * map_size (coverage + density)
     n_actions = len(env.possible_locations)
     policy_network = SensorPlacementPolicy(input_dim, n_actions, hidden_dim=128)
     
@@ -37,12 +41,13 @@ def main():
     
     running = True
     paused = False
-    epochs = 3000
-    batch_size = 4
-    initial_entropy = 0.15
-    decay_rate = 0.9995
-    use_action_masking = True
-    minimum_entropy = 0.02
+
+    epochs = 2000
+    batch_size = 8
+    initial_entropy = 0.3
+    decay_rate = 0.998
+    use_action_masking = False
+    minimum_entropy = 0.001
      
     # store the last good state for pause visualization
     last_good_state = None
