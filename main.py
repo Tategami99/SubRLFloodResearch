@@ -33,39 +33,30 @@ def main():
     n_actions = len(env.possible_locations)
     policy_network = SensorPlacementPolicy(input_dim, n_actions, hidden_dim=128)
     
-    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.0005, entropy_coef=0.01)
+    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.001, entropy_coef=0.02)
     
     running = True
     paused = False
-    epochs = 1000
+    epochs = 2000
     batch_size = 8
-    
-    print("Starting SubPo Training with Live Visualization")
-    print("=" * 50)
-    print("Controls:")
-    print("  SPACE - Pause/Resume training")
-    print("  S - Save current model")
-    print("  E - Export training data to CSV") 
-    print("  ESC - Stop training")
-    print("=" * 50)
-    
+     
     # store the last good state for pause visualization
     last_good_state = None
     current_epoch = 0
     
-    while running and current_epoch < epochs:
+    while running:
         for event in pygame.event.get():
             if event.type == QUIT:
                 running = False
             elif event.type == KEYDOWN:
                 if event.key == K_SPACE:
                     paused = not paused
-                    print("Paused" if paused else "Resumed")
                 elif event.key == K_s:
                     trainer.save_model(f"./data/subpo_epoch_{current_epoch}.pth")
                 elif event.key == K_e:
                     trainer.export_training_data(f"./data/training_epoch_{current_epoch}.csv")
                 elif event.key == K_ESCAPE:
+                    print("Quitting")
                     running = False
         
         if paused:
@@ -88,17 +79,20 @@ def main():
             else:
                 # if no good state yet, just render current env
                 training_data = trainer.get_training_data()
-                running = visualizer.render(
+                visualizer.render(
                     env, current_epoch, 0, 0, 0, training_data, paused=True
                 )
             
             time.sleep(0.1)
             continue  # skip the rest of the training loop when paused
+
+        if current_epoch >= epochs:
+            continue
             
         # TRAINING LOGIC
         # collect trajectories and get visualization data
         (batch_trajectories, epoch_rewards, epoch_marginal_sums, 
-         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size, use_action_masking=True)
+         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size, use_action_masking=False)
         
         # update policy
         loss = trainer.update_policy(batch_trajectories)
@@ -142,7 +136,7 @@ def main():
             training_data = trainer.get_training_data()
             
             # render everything
-            running = visualizer.render(
+            visualizer.render(
                 env, current_epoch, current_reward, current_marginal, current_dup_rate, training_data
             )
         
