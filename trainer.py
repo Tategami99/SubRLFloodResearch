@@ -3,11 +3,10 @@ import numpy as np
 from utils import create_action_mask, apply_action_mask
 
 class SubPolicyTrainer:
-    def __init__(self, env, policy_network, learning_rate=0.001, entropy_coef=0.01):
+    def __init__(self, env, policy_network, learning_rate=0.001):
         self.env = env
         self.policy_network = policy_network
         self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=learning_rate)
-        self.entropy_coef = entropy_coef
         
         # training metrics
         self.epochs = []
@@ -24,7 +23,7 @@ class SubPolicyTrainer:
         return ((len(drone_positions) - unique) / len(drone_positions)) * 100
     
     # use marginal gains to compute submodular policy gradient(theorem 2)
-    def compute_subpo_gradient(self, trajectories):
+    def compute_subpo_gradient(self, trajectories, entropy_coef):
         policy_gradients = []
 
         for trajectory in trajectories:
@@ -63,7 +62,7 @@ class SubPolicyTrainer:
             loss = 0
             for log_prob, advantage in zip(log_probs, advantages):
                 loss -= log_prob * advantage
-                loss -= self.entropy_coef * entropy  # encourage exploration
+                loss -= entropy_coef * entropy  # encourage exploration
             
             policy_gradients.append(loss)
 
@@ -120,9 +119,9 @@ class SubPolicyTrainer:
         return batch_trajectories, epoch_rewards, epoch_marginal_sums, epoch_duplicate_rates, all_states_actions
     
     # update policy with collected trajectories
-    def update_policy(self, batch_trajectories):
+    def update_policy(self, batch_trajectories, entropy_coef):
         self.optimizer.zero_grad()
-        loss = self.compute_subpo_gradient(batch_trajectories)
+        loss = self.compute_subpo_gradient(batch_trajectories, entropy_coef)
         loss.backward()
         self.optimizer.step()
         return loss.item()

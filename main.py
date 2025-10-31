@@ -33,12 +33,16 @@ def main():
     n_actions = len(env.possible_locations)
     policy_network = SensorPlacementPolicy(input_dim, n_actions, hidden_dim=128)
     
-    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.001, entropy_coef=0.02)
+    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.001)
     
     running = True
     paused = False
-    epochs = 2000
-    batch_size = 8
+    epochs = 3000
+    batch_size = 4
+    initial_entropy = 0.15
+    decay_rate = 0.9995
+    use_action_masking = True
+    minimum_entropy = 0.02
      
     # store the last good state for pause visualization
     last_good_state = None
@@ -92,10 +96,12 @@ def main():
         # TRAINING LOGIC
         # collect trajectories and get visualization data
         (batch_trajectories, epoch_rewards, epoch_marginal_sums, 
-         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size, use_action_masking=False)
+         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size, use_action_masking=use_action_masking)
         
         # update policy
-        loss = trainer.update_policy(batch_trajectories)
+        current_entropy_coef = initial_entropy * (decay_rate ** current_epoch)
+        current_entropy_coef = max(current_entropy_coef, minimum_entropy)
+        loss = trainer.update_policy(batch_trajectories, current_entropy_coef)
         
         # update metrics
         avg_reward = np.mean(epoch_rewards)
