@@ -33,7 +33,7 @@ def main():
     n_actions = len(env.possible_locations)
     policy_network = SensorPlacementPolicy(input_dim, n_actions, hidden_dim=128)
     
-    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.001)
+    trainer = SubPolicyTrainer(env, policy_network, learning_rate=0.0005, entropy_coef=0.01)
     
     running = True
     paused = False
@@ -98,7 +98,7 @@ def main():
         # TRAINING LOGIC
         # collect trajectories and get visualization data
         (batch_trajectories, epoch_rewards, epoch_marginal_sums, 
-         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size)
+         epoch_duplicate_rates, viz_data) = trainer.collect_trajectories(batch_size, use_action_masking=True)
         
         # update policy
         loss = trainer.update_policy(batch_trajectories)

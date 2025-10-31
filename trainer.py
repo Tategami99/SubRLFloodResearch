@@ -1,11 +1,13 @@
 import torch
 import numpy as np
+from utils import create_action_mask, apply_action_mask
 
 class SubPolicyTrainer:
-    def __init__(self, env, policy_network, learning_rate=0.001):
+    def __init__(self, env, policy_network, learning_rate=0.001, entropy_coef=0.01):
         self.env = env
         self.policy_network = policy_network
         self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=learning_rate)
+        self.entropy_coef = entropy_coef
         
         # training metrics
         self.epochs = []
@@ -46,24 +48,29 @@ class SubPolicyTrainer:
 
             # compute policy gradient
             log_probs = []
+            entropies = []
             for state, action in zip(states, actions):
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action_probs = self.policy_network(state_tensor)
                 dist = torch.distributions.Categorical(action_probs)
                 log_prob = dist.log_prob(torch.tensor(action))
+                entropy = dist.entropy()
+
                 log_probs.append(log_prob)
+                entropies.append(entropy)
 
             # submodular policy gradient
             loss = 0
             for log_prob, advantage in zip(log_probs, advantages):
                 loss -= log_prob * advantage
+                loss -= self.entropy_coef * entropy  # encourage exploration
             
             policy_gradients.append(loss)
 
         return torch.stack(policy_gradients).mean()
     
     # collect trajectories for one epoch - returns metrics for visualization
-    def collect_trajectories(self, batch_size=8):
+    def collect_trajectories(self, batch_size=8, use_action_masking=False):
         batch_trajectories = []
         epoch_rewards = []
         epoch_marginal_sums = []
@@ -78,7 +85,14 @@ class SubPolicyTrainer:
             while not done:
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action_probs = self.policy_network(state_tensor)
-                dist = torch.distributions.Categorical(action_probs)
+
+                if use_action_masking:
+                    action_mask = create_action_mask(self.env.visited_locations, self.env.possible_locations)
+                    masked_probs = apply_action_mask(action_probs, action_mask)
+                    dist = torch.distributions.Categorical(masked_probs)
+                else:
+                    dist = torch.distributions.Categorical(action_probs)
+                    
                 action = dist.sample()
 
                 next_state, marginal_gain, total_reward, done = self.env.step(action.item())
