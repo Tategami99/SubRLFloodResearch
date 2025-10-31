@@ -10,11 +10,12 @@ from pygame.locals import *
 def create_density_map():
     map_size = 8
     density_map = np.zeros((map_size, map_size))
-    density_map[2:4, 2:4] = 0.8
-    density_map[5:7, 1:3] = 0.6 
-    density_map[1:3, 5:7] = 0.7
+    density_map[2:4, 2:4] = 0.9
+    density_map[5:7, 1:3] = 0.7  
+    density_map[1:3, 5:7] = 0.8
     density_map[0:2, 0:2] = 0.4
     density_map[6:8, 6:8] = 0.3
+    density_map[3:5, 3:5] = 0.5
     return density_map
 
 def main():
