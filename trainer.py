@@ -16,13 +16,25 @@ class SubPolicyTrainer:
         self.best_rewards = []
         self.duplicate_rates = []
     
+    #how often we visit the same location multiple times
+    #submodular rewards naturally discourage duplication due to diminishing returns
     def compute_duplicate_rate(self, drone_positions):
         if not drone_positions:
             return 0.0
         unique = len(set(drone_positions))
         return ((len(drone_positions) - unique) / len(drone_positions)) * 100
     
-    # use marginal gains to compute submodular policy gradient(theorem 2)
+    """
+    Regular Policy Gradient (REINFORCE):
+    ∇J(θ) = E[∑ ∇logπ(a|s) * (total future reward)]
+
+    Submodular Policy Gradient (SubPo):
+    ∇J(θ) = E[∑ ∇logπ(a|s) * (∑ future MARGINAL GAINS)]
+
+    use marginal gains instead of rewards
+    focuses on actions that provide new value instead of
+    just high-rewarding actions
+    """
     def compute_subpo_gradient(self, trajectories, entropy_coef):
         policy_gradients = []
 
@@ -34,8 +46,12 @@ class SubPolicyTrainer:
 
             H = len(marginal_gains)
             cumulative_future_gains = []
+
+            #cumulative marginal gain
+            # ∑_{j=i}^{H-1} F(s_{j+1}|τ_{0:j})
+            # for each time step, compute the sum of future marginal gains
             for i in range(H):
-                discount_factor = 0.95
+                discount_factor = 0.95 #how much we value immediate vs future gains
                 future_gain = sum(marginal_gains[i] * (discount_factor ** (j - i)) for j in range(i, H))
                 cumulative_future_gains.append(future_gain)
 
@@ -45,32 +61,72 @@ class SubPolicyTrainer:
             # baseline = cumulative_future_gains.mean()
             # advantages = cumulative_future_gains - baseline
 
+            #subtract a baseline b(τ_{0:i}) from the score gradient
             # better baseline: moving average of marginal gains
+
+            """
+            VARIANCE REDUCTION WITH BASELINES
+            
+            raw cumulative gains can have high variance which makes training unstable
+
+            subtract a baseline(moving average) from the score gradient
+            to center the values
+            reduces variance without changing the expected gradient
+            """
             baseline = torch.zeros_like(cumulative_future_gains)
             for i in range(H):
                 if i == 0:
                     baseline[i] = cumulative_future_gains[i]
                 else:
+                    #exponential moving average: 80% previous baseline + 20% current value
                     baseline[i] = 0.8 * baseline[i-1] + 0.2 * cumulative_future_gains[i]
 
+            #how much better than expected
             advantages = cumulative_future_gains - baseline
 
-            # normalize advantages
+            """
+            NORMALIZE FOR STABILITY
+
+            gradient updates depend on the scale of advantages
+            if advntages are large -> large gradient steps -> training instability
+            if advantages are small -> small gradient steps -> slow learning
+
+            normalizing makes the scale consistent across different episodes
+            """
             if advantages.std() > 0:
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-            # compute policy gradient
+            """
+            COMPUTE POLICY GRADIENT
+            ∇J(π_θ) = E[∑ ∇logπ(a_i|s_i) * (∑_{j=i}^{H-1} F(s_{j+1}|τ_{0:j}) - b(τ_{0:i}))]
+
+            ∇logπ(a_i|s_i) is the score function (how changing θ affects action probability)
+            the sum term is our "advantages" (how good this action was for future marginal gains)
+
+            b(τ_{0:i}) is our baseline (what we expected to get)
+            """
             total_loss = 0.0
             entropy_sum = 0.0
             for i, (state, action) in enumerate(zip(states, actions)):
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action_probs = self.policy_network(state_tensor)
                 dist = torch.distributions.Categorical(action_probs)
-                log_prob = dist.log_prob(torch.tensor(action))
-                entropy = dist.entropy()
+                log_prob = dist.log_prob(torch.tensor(action)) #ln(probability of chosen action)
+                entropy = dist.entropy() #measure of randomness(higher = more exploration)
 
-                # submodular policy gradient with entropy regularization
+                """
+                POLICY GRADIENT TERM:
+                log_prob * advantage means:
+                increase probability of actions that had positive advantage (better than expected)"
+                decrease probability of actions that had negative advantage (worse than expected)"
+                """
                 policy_loss = -log_prob * advantages[i]
+
+                """
+                ENTROPY REGULARIZATION:
+                higher entropy -> more random actions -> more exploration
+                add entropy to encourage exploration(negative sign to miniimize loss)
+                """
                 entropy_loss = -entropy_coef * entropy
 
                 total_loss += policy_loss + entropy_loss
@@ -80,7 +136,12 @@ class SubPolicyTrainer:
 
         return torch.stack(policy_gradients).mean() if policy_gradients else torch.tensor(0.0)
     
-    # collect trajectories for one epoch - returns metrics for visualization
+    """
+    collect trajectories for one epoch - returns metrics for visualization
+
+    COLLECT EXPERIENCE BY RUNNING THE CURRENT POLICY
+    Sample a_h ∼ π(a_h|s_h), execute a_h and collect data
+    """
     def collect_trajectories(self, batch_size=8, use_action_masking=False):
         batch_trajectories = []
         epoch_rewards = []
@@ -97,7 +158,10 @@ class SubPolicyTrainer:
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action_probs = self.policy_network(state_tensor)
 
+                #sample from the probability distribution
+                #sometimes take suboptimal actions
                 if use_action_masking:
+                    #prevents selecting already-visited positions   
                     action_mask = create_action_mask(self.env.visited_locations, self.env.possible_locations)
                     masked_probs = apply_action_mask(action_probs, action_mask)
                     dist = torch.distributions.Categorical(masked_probs)
@@ -115,6 +179,7 @@ class SubPolicyTrainer:
 
                 state = next_state
 
+            #store complete trajectory for gradient computation
             batch_trajectories.append((trajectory['states'], trajectory['actions'], trajectory['marginal_gains']))
             epoch_rewards.append(trajectory['rewards'][-1])
             epoch_marginal_sums.append(sum(trajectory['marginal_gains']))
@@ -136,14 +201,16 @@ class SubPolicyTrainer:
             return 0.0
 
         self.optimizer.zero_grad()
+
+        #compute loss
         loss = self.compute_subpo_gradient(batch_trajectories, entropy_coef)
         
         # only backward if valid loss
         if loss != 0.0:
-            loss.backward()
-            # gradient clipping to prevent explosions
+            loss.backward() #compute gradients using backpropogation
+            # if gradeints get too large, scale them to a max norm of 1
             torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
-            self.optimizer.step()
+            self.optimizer.step() #update network weights
 
         # if len(self.epoch_rewards) > 200:
         #     recent_best = max(self.epoch_rewards[-100:])

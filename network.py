@@ -13,12 +13,12 @@ class SensorPlacementPolicy(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform_(m.weight)
+            torch.nn.init.xavier_uniform_(m.weight) #xavier initialization
             m.bias.data.fill_(0.01)
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
+        x = torch.relu(self.fc1(x)) #non-linear transformation
+        x = torch.relu(self.fc2(x)) 
         x = torch.relu(self.fc3(x))
-        x = self.fc4(x)
-        return torch.softmax(x, dim=-1)
+        x = self.fc4(x) #final layer - raw scores(logits)
+        return torch.softmax(x, dim=-1) #convert to probabilities that sum to 1

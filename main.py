@@ -43,6 +43,7 @@ def main():
     running = True
     paused = False
 
+    #HYPERPARAMETERS
     epochs = 2000
     batch_size = 8
     initial_entropy = 0.3
